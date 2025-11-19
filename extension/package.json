@@ -1,0 +1,32 @@
+{
+  "name": "osae",
+  "displayName": "OSAE",
+  "description": "OSAE VS Code extension",
+  "version": "0.0.1",
+  "publisher": "osae",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "osae.start",
+        "title": "Start OSAE"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.2.0"
+  }
+}

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OSAE Dashboard</title>
+  <style>
+    :root { --bg:#f7f8fb; --card:#ffffff; --muted:#6b7280; --accent:#3b82f6; }
+    html,body{height:100%}
+    body {
+      margin:0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background:var(--bg);
+      color:#111827;
+      padding:20px;
+    }
+    h1{margin:0 0 12px 0;font-size:18px}
+    section{margin-bottom:18px}
+    pre#userPrompt{
+      background:var(--card);
+      border:1px solid #e5e7eb;
+      padding:12px;
+      border-radius:6px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      margin:8px 0 0 0;
+    }
+    ul#planList{list-style:none;padding:0;margin:8px 0 0 0;display:block}
+    .step{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      background:var(--card);
+      border:1px solid #e5e7eb;
+      padding:10px;
+      border-radius:6px;
+      margin-bottom:8px;
+    }
+    .step .index{
+      min-width:28px;
+      font-weight:600;
+      color:var(--muted);
+    }
+    .step.current{
+      border-color:var(--accent);
+      box-shadow:0 1px 0 rgba(59,130,246,0.08);
+      background:linear-gradient(180deg, rgba(59,130,246,0.04), transparent);
+    }
+    .placeholder{color:var(--muted);padding:6px}
+  </style>
+</head>
+<body>
+  <h1>Dashboard</h1>
+  <section id="prompt">
+    <h2 style="font-size:13px;margin:0;color:var(--muted)">User Prompt</h2>
+    <pre id="userPrompt">Waiting for prompt...</pre>
+  </section>
+  <section id="plan">
+    <h2 style="font-size:13px;margin:0;color:var(--muted)">Plan</h2>
+    <ul id="planList"><li class="placeholder">No plan received</li></ul>
+  </section>
+  <script>
+    (function(){
+      const userPromptEl = document.getElementById('userPrompt');
+      const planListEl = document.getElementById('planList');
+
+      function escapeHtml(s){
+        if(s == null) return '';
+        return String(s).replace(/[&<>"']/g, function(m){
+          return {'&':'&','<':'<','>':'>','"':'"',"'":'''}[m];
+        });
+      }
+
+      function normalizeSteps(plan){
+        if(!Array.isArray(plan)) return [];
+        return plan.map((p, i) => {
+          if(typeof p === 'string') return { id: String(i), title: p, raw: p };
+          if(typeof p === 'object' && p !== null){
+            return { id: p.id ?? p.stepId ?? p.name ?? String(i), title: p.title ?? p.name ?? p.text ?? JSON.stringify(p), raw: p };
+          }
+          return { id: String(i), title: String(p), raw: p };
+        });
+      }
+
+      function renderPlan(plan, current){
+        planListEl.innerHTML = '';
+        const steps = normalizeSteps(plan);
+        if(steps.length === 0){
+          planListEl.innerHTML = '<li class="placeholder">No plan</li>';
+          return;
+        }
+        steps.forEach((step, idx) => {
+          const li = document.createElement('li');
+          li.className = 'step';
+          const indexDiv = document.createElement('div');
+          indexDiv.className = 'index';
+          indexDiv.textContent = (idx + 1) + '.';
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'content';
+          contentDiv.innerHTML = escapeHtml(step.title);
+
+          li.appendChild(indexDiv);
+          li.appendChild(contentDiv);
+
+          // determine if this is the current step
+          const currentIndex = typeof current === 'number' ? current : (typeof current === 'string' && /^\d+$/.test(current) ? parseInt(current,10) : null);
+          if(currentIndex !== null){
+            if(idx === currentIndex) li.classList.add('current');
+          } else if(current !== undefined && current !== null){
+            // compare ids / names
+            if(String(step.id) === String(current) || String(idx) === String(current)){
+              li.classList.add('current');
+            }
+          }
+
+          planListEl.appendChild(li);
+        });
+      }
+
+      window.addEventListener('message', (event) => {
+        const data = event.data || {};
+        const prompt = data.userPrompt ?? data.prompt ?? data.message ?? '';
+        const plan = data.plan ?? data.steps ?? [];
+        const current = data.currentStepIndex ?? data.currentStep ?? data.activeStep ?? data.current ?? data.currentIndex;
+
+        userPromptEl.textContent = prompt || '—';
+        renderPlan(plan, current);
+      });
+
+      // for debugging in the webview devtools
+      window.__osae_dashboard = { renderPlan };
+    })();
+  </script>
+</body>
+</html>
