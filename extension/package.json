@@ -27,7 +27,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "build:webview": "npm run build --prefix ../webview-ui && node ../scripts/copy-dist.js",
+    "build:webview": "npm run build --prefix ../webview-ui",
     "prepackage": "node ../scripts/bundle-assets.js",
     "package": "npm run prepackage && vsce package"
   },

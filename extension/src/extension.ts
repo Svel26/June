@@ -15,7 +15,7 @@ let dashboardPanel: vscode.WebviewPanel | undefined;
 function spawnPythonServer(context: vscode.ExtensionContext): ChildProcess | undefined {
     try {
         const agentServerPath = path.join(context.extensionPath, 'agent-server');
- 
+
         // Use the Python interpreter from the extension's bundled venv.
         // On Windows: venv\Scripts\python.exe
         // On Unix:   venv/bin/python
@@ -25,7 +25,7 @@ function spawnPythonServer(context: vscode.ExtensionContext): ChildProcess | und
             process.platform === 'win32' ? 'Scripts' : 'bin',
             process.platform === 'win32' ? 'python.exe' : 'python'
         );
- 
+
         // Always use the venv interpreter — never fall back to system Python.
         let pythonCmd: string = pythonExe;
         try {
@@ -109,14 +109,14 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; connect-src ${cspSource} http://127.0.0.1:8000; script-src ${cspSource}; style-src ${cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https:; connect-src ${cspSource} http://127.0.0.1:8000; script-src ${cspSource} 'unsafe-inline'; style-src ${cspSource} 'unsafe-inline';">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OSAE Dashboard</title>
   <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
   <div id="root"></div>
-  <script src="${scriptUri}"></script>
+  <script type="module" src="${scriptUri}"></script>
 </body>
 </html>`;
 }
@@ -291,16 +291,16 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine('[OSAE] fetch is not available; cannot start task.');
             return;
         }
-    
+
         // Simulation fallback removed — extension must use the real Python sidecar (venv).
-    
+
         try {
             // POST /task to create a new task with a short timeout — if the server is unreachable
             // this should throw and we will fall back to simulation.
             const controller = new AbortController();
             const timeoutMs = 3000;
             const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-    
+
             const res = await fetchFn('http://127.0.0.1:8000/task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -308,25 +308,25 @@ export async function activate(context: vscode.ExtensionContext) {
                 signal: controller.signal
             });
             clearTimeout(timeoutHandle);
-    
+
             if (!res || !res.ok) {
                 outputChannel.appendLine(`[OSAE] Failed to create task (status ${res ? res.status : 'no-response'})`);
                 return;
             }
-    
+
             const data = await res.json();
             const taskId = data.task_id || data.id || data.taskId;
             if (!taskId) {
                 outputChannel.appendLine('[OSAE] POST /task did not return a task_id.');
                 return;
             }
-    
+
             outputChannel.appendLine(`[OSAE] Started task: ${taskId}`);
             let currentTaskId = taskId;
-    
+
             // Notify webview that task started
             panel.webview.postMessage({ type: 'task_started', task_id: currentTaskId });
-    
+
             // Polling loop every 1000ms
             const interval = setInterval(async () => {
                 try {
@@ -338,7 +338,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     const json = await r.json();
                     // Post the JSON result to the Webview
                     panel.webview.postMessage({ type: 'task_update', data: json });
-    
+
                     // Stop polling when task is completed
                     if (json.task_status === 'completed' || json.status === 'completed' || json.state === 'completed') {
                         outputChannel.appendLine(`[OSAE] Task ${currentTaskId} completed; stopping poll.`);
