@@ -5,3 +5,7 @@ langgraph
 langchain
 langchain_ollama
 langchain_core
+langchain-openai
+langchain-anthropic
+python-dotenv
+mcp

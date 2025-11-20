@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { spawn, spawnSync, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 
 const outputChannel = vscode.window.createOutputChannel('OSAE');
 let pythonProcess: ChildProcess | undefined;
@@ -13,26 +14,29 @@ let dashboardPanel: vscode.WebviewPanel | undefined;
  */
 function spawnPythonServer(context: vscode.ExtensionContext): ChildProcess | undefined {
     try {
-        const agentServerPath = path.join(context.extensionPath, '..', 'agent-server');
-
-        // Try a list of candidate python launchers and pick the first that responds to `--version`.
-        const candidates = process.platform === 'win32' ? ['py', 'python', 'python3'] : ['python3', 'python'];
-        let pythonCmd: string | undefined;
-        for (const candidate of candidates) {
-            try {
-                const check = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
-                if (check && typeof (check as any).status === 'number' && (check as any).status === 0) {
-                    pythonCmd = candidate;
-                    break;
-                }
-            } catch (e) {
-                // ignore and try next candidate
+        const agentServerPath = path.join(context.extensionPath, 'agent-server');
+ 
+        // Use the Python interpreter from the extension's bundled venv.
+        // On Windows: venv\Scripts\python.exe
+        // On Unix:   venv/bin/python
+        const pythonExe = path.join(
+            agentServerPath,
+            'venv',
+            process.platform === 'win32' ? 'Scripts' : 'bin',
+            process.platform === 'win32' ? 'python.exe' : 'python'
+        );
+ 
+        // Always use the venv interpreter — never fall back to system Python.
+        let pythonCmd: string = pythonExe;
+        try {
+            const check = spawnSync(pythonExe, ['--version'], { stdio: 'ignore' });
+            if (!check || typeof (check as any).status !== 'number' || (check as any).status !== 0) {
+                throw new Error(`venv python not found or not executable at ${pythonExe}`);
             }
-        }
-
-        if (!pythonCmd) {
-            outputChannel.appendLine('[OSAE] No usable Python executable found in PATH; sidecar will not start.');
-            return undefined;
+        } catch (e) {
+            outputChannel.appendLine(`[OSAE] venv Python executable not found or not usable at "${pythonExe}": ${e}`);
+            // Fail loudly — do not attempt to fall back to system Python.
+            throw e;
         }
 
         const proc = spawn(pythonCmd, ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000'], {
@@ -117,11 +121,116 @@ function getWebviewContent(context: vscode.ExtensionContext, webview: vscode.Web
 </html>`;
 }
 
-export function activate(context: vscode.ExtensionContext) {
+/**
+ * Ensure the bundled agent-server venv exists; if missing, run the platform-appropriate setup script
+ * and await its completion before continuing. Shows a user-facing progress notification while running.
+ */
+async function ensureAgentServerSetup(context: vscode.ExtensionContext): Promise<void> {
+    const agentServerPath = path.join(context.extensionPath, 'agent-server');
+    const pythonExe = path.join(
+        agentServerPath,
+        'venv',
+        process.platform === 'win32' ? 'Scripts' : 'bin',
+        process.platform === 'win32' ? 'python.exe' : 'python'
+    );
+
+    if (fs.existsSync(pythonExe)) {
+        outputChannel.appendLine(`[OSAE] Found bundled venv Python at ${pythonExe}`);
+        return;
+    }
+
+    outputChannel.appendLine('[OSAE] Bundled venv Python not found; running initial setup.');
+
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'OSAE: Initializing AI Runtime...',
+        cancellable: false
+    }, (progress) => {
+        return new Promise<void>((resolve, reject) => {
+            const scriptName = process.platform === 'win32' ? 'setup_agent_server.ps1' : 'setup_agent_server.sh';
+            const scriptPath = path.join(context.extensionPath, 'scripts', scriptName);
+
+            outputChannel.appendLine(`[OSAE] Running setup script: ${scriptPath}`);
+
+            let cmd: string;
+            let args: string[];
+
+            if (process.platform === 'win32') {
+                // Use powershell to run the setup script
+                cmd = 'powershell.exe';
+                args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+            } else {
+                // Use bash/sh to run the script on Unix-like systems
+                cmd = 'bash';
+                args = [scriptPath];
+            }
+
+            const child = spawn(cmd, args, { cwd: context.extensionPath, stdio: ['ignore', 'pipe', 'pipe'] });
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout?.on('data', (c: Buffer) => {
+                const text = c.toString();
+                stdout += text;
+                outputChannel.appendLine(`[setup stdout] ${text.trim()}`);
+            });
+            child.stderr?.on('data', (c: Buffer) => {
+                const text = c.toString();
+                stderr += text;
+                outputChannel.appendLine(`[setup stderr] ${text.trim()}`);
+            });
+
+            child.on('error', (err) => {
+                outputChannel.appendLine(`[OSAE] Failed to spawn setup script: ${err}`);
+                vscode.window.showErrorMessage('[OSAE] Failed to start AI runtime setup. See OSAE output for details.');
+                reject(err);
+            });
+
+            child.on('close', (code) => {
+                if (code === 0) {
+                    outputChannel.appendLine('[OSAE] Agent server setup completed successfully.');
+                    // Quick sanity check: pythonExe should now exist
+                    if (!fs.existsSync(pythonExe)) {
+                        outputChannel.appendLine(`[OSAE] Setup finished but venv python still missing at ${pythonExe}`);
+                        vscode.window.showErrorMessage('[OSAE] Setup completed but bundled Python not found. See OSAE output.');
+                        reject(new Error('venv python missing after setup'));
+                        return;
+                    }
+                    resolve();
+                } else {
+                    outputChannel.appendLine(`[OSAE] Agent server setup failed with code ${code}. Stderr:\n${stderr}`);
+                    vscode.window.showErrorMessage(`[OSAE] AI runtime setup failed. See OSAE output for details.`);
+                    reject(new Error(stderr || `setup exited with code ${code}`));
+                }
+            });
+        });
+    });
+}
+
+export async function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('[OSAE] Activating extension and starting orchestration.');
 
-    // Spawn Python server and keep reference for cleanup
-    pythonProcess = spawnPythonServer(context);
+    // Ensure the agent-server venv exists; if not, run first-run setup and wait for completion.
+    try {
+        await ensureAgentServerSetup(context);
+    } catch (err: any) {
+        outputChannel.appendLine(`[OSAE] Agent server setup failed: ${err}`);
+        // err may contain stderr text; include a short snippet in the shown message
+        const detail = (err && err.message) ? err.message : String(err);
+        vscode.window.showErrorMessage(`[OSAE] Failed to initialize AI runtime: ${detail}`);
+        // Do not proceed to spawn the Python server if setup failed
+        return;
+    }
+
+    // Spawn Python server and keep reference for cleanup (use venv interpreter; fail loudly on error)
+    try {
+        pythonProcess = spawnPythonServer(context);
+    } catch (err) {
+        outputChannel.appendLine(`[OSAE] Failed to start Python sidecar: ${err}`);
+        vscode.window.showErrorMessage('[OSAE] Failed to start Python sidecar. See OSAE output for details.');
+        pythonProcess = undefined;
+    }
 
     // Ensure we attempt health check 2 seconds after starting the process
     setTimeout(() => {
@@ -149,6 +258,16 @@ export function activate(context: vscode.ExtensionContext) {
         );
         // Load the built React app from the extension's media folder
         dashboardPanel.webview.html = getWebviewContent(context, dashboardPanel.webview);
+        // Handle messages from the Webview
+        dashboardPanel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg && msg.type === 'osae.reset') {
+                try {
+                    await vscode.commands.executeCommand('osae.reset');
+                } catch (err) {
+                    outputChannel.appendLine(`[OSAE] Error executing osae.reset command: ${err}`);
+                }
+            }
+        });
         dashboardPanel.onDidDispose(() => {
             dashboardPanel = undefined;
         });
@@ -173,27 +292,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
     
-        // Helper to start a simulated task (used only on network failure)
-        const startSimulatedTask = () => {
-            outputChannel.appendLine('[OSAE] Starting simulated task for UI verification (fallback).');
-            const simulatedPlan = ['Gather context', 'Plan actions', 'Execute steps'];
-            const simTaskId = `sim-${Date.now()}`;
-            panel.webview.postMessage({ type: 'task_started', task_id: simTaskId, prompt: 'Simulated run' });
-            panel.webview.postMessage({ type: 'task_update', data: { plan: simulatedPlan, currentStepIndex: 0 } });
-    
-            let idx = 0;
-            const simInterval = setInterval(() => {
-                idx++;
-                panel.webview.postMessage({ type: 'task_update', data: { plan: simulatedPlan, currentStepIndex: idx } });
-                outputChannel.appendLine(`[OSAE] Simulated task ${simTaskId} progress: step ${idx}`);
-    
-                if (idx >= simulatedPlan.length - 1) {
-                    panel.webview.postMessage({ type: 'task_update', data: { plan: simulatedPlan, currentStepIndex: idx, status: 'completed', task_status: 'completed', state: 'completed' } });
-                    outputChannel.appendLine(`[OSAE] Simulated task ${simTaskId} completed; stopping simulated poll.`);
-                    clearInterval(simInterval);
-                }
-            }, 1000);
-        };
+        // Simulation fallback removed — extension must use the real Python sidecar (venv).
     
         try {
             // POST /task to create a new task with a short timeout — if the server is unreachable
@@ -205,7 +304,7 @@ export function activate(context: vscode.ExtensionContext) {
             const res = await fetchFn('http://127.0.0.1:8000/task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ prompt: '' }),
                 signal: controller.signal
             });
             clearTimeout(timeoutHandle);
@@ -250,19 +349,37 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }, 1000);
         } catch (err: any) {
-            // Determine if error is a network/connect/timeout issue — only then fall back to simulation.
-            const msg = (err && err.message) ? String(err.message) : String(err);
-            const isNetworkError = err && (err.name === 'AbortError' || /ECONNREFUSED|connect|failed to fetch|NetworkError/i.test(msg));
+            // Fail loudly on any error when interacting with the real sidecar — do not simulate.
             outputChannel.appendLine(`[OSAE] Error creating task: ${err}`);
-            if (isNetworkError) {
-                outputChannel.appendLine('[OSAE] Server unreachable — falling back to simulated task.');
-                startSimulatedTask();
-            } else {
-                outputChannel.appendLine('[OSAE] Server returned an error; not falling back to simulation.');
-            }
+            vscode.window.showErrorMessage(`[OSAE] Failed to create task: ${err}`);
+            return;
         }
     });
     context.subscriptions.push(startCommand);
+
+    // Register command to reset TASK_STORE via sidecar API and refresh the dashboard webview
+    const resetCommand = vscode.commands.registerCommand('osae.reset', async () => {
+        const fetchFn = (globalThis as any).fetch;
+        if (typeof fetchFn !== 'function') {
+            outputChannel.appendLine('[OSAE] fetch is not available; cannot perform reset.');
+            return;
+        }
+        try {
+            const res = await fetchFn('http://127.0.0.1:8000/reset', { method: 'POST' });
+            if (!res || !res.ok) {
+                outputChannel.appendLine(`[OSAE] Reset request failed (status ${res ? res.status : 'no-response'})`);
+                return;
+            }
+            outputChannel.appendLine('[OSAE] TASK_STORE reset via sidecar.');
+            // Refresh webview if open
+            if (dashboardPanel) {
+                dashboardPanel.webview.html = getWebviewContent(context, dashboardPanel.webview);
+            }
+        } catch (err) {
+            outputChannel.appendLine(`[OSAE] Error calling reset endpoint: ${err}`);
+        }
+    });
+    context.subscriptions.push(resetCommand);
 
     // Add a disposable to context so the output channel is disposed when extension deactivates
     context.subscriptions.push(outputChannel);

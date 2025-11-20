@@ -5,20 +5,18 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   build: {
-    outDir: '../extension/media',
+    outDir: "../extension/media",
+    emptyOutDir: true,
+    // Disable CSS code-splitting so styles emit as a single index.css
+    cssCodeSplit: false,
     rollupOptions: {
       output: {
-        // Ensure a consistent filename for the webview entry so the extension can reference it reliably
-        entryFileNames: 'index.js',
-        // Keep chunks in a subfolder with hashes to avoid name collisions during incremental builds
-        chunkFileNames: 'chunks/[name]-[hash].js',
-        // Emit a single index.css for styles so the extension can reference a stable path
-        assetFileNames: (assetInfo: { name?: string }) => {
-          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-            return 'index.css';
-          }
-          return 'assets/[name]-[hash][extname]';
-        }
+        // Single deterministic entry filename for the webview script
+        entryFileNames: "index.js",
+        // Inline dynamic imports to avoid generating chunk files
+        inlineDynamicImports: true,
+        // Deterministic asset filenames (index.css)
+        assetFileNames: "index.[ext]"
       }
     }
   }

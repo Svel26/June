@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 class Artifact(BaseModel):
     id: UUID
-    type: Literal["code", "markdown", "diff"]
+    # Support code, diff and markdown artifacts to match frontend renderer
+    type: Literal["code", "diff", "markdown"]
     title: str
     content: str

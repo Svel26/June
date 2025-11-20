@@ -1,9 +1,9 @@
 {
   "name": "osae",
-  "displayName": "OSAE",
-  "description": "OSAE VS Code extension",
+  "displayName": "OSAE - Open Source Agentic Environment",
+  "description": "An autonomous coding agent with local inference and generative UI.",
   "version": "0.0.1",
-  "publisher": "osae",
+  "publisher": "osae-community",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -16,13 +16,20 @@
       {
         "command": "osae.start",
         "title": "Start OSAE"
+      },
+      {
+        "command": "osae.openDashboard",
+        "title": "Open OSAE Dashboard"
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "build:webview": "npm run build --prefix ../webview-ui && node ../scripts/copy-dist.js",
+    "prepackage": "node ../scripts/bundle-assets.js",
+    "package": "npm run prepackage && vsce package"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

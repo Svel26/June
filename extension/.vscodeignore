@@ -1,0 +1,37 @@
+# .vscodeignore — packaging rules for VS Code extension
+
+# Exclude dependencies and dev/source files
+node_modules/
+
+# Exclude TypeScript sources (keep compiled output only)
+**/src/
+**/*.ts
+**/*.tsx
+
+# Version control
+.git
+.gitignore
+
+# Source maps
+*.map
+**/*.map
+
+# Exclude agent-server junk (virtualenvs, caches, secrets)
+agent-server/venv/**
+agent-server/__pycache__/**
+agent-server/.env
+
+# Exclude bundled-mcp junk (any nested venvs or caches created during bundling)
+bundled-mcp/**/venv/**
+bundled-mcp/**/__pycache__/**
+
+# Ensure these important folders are INCLUDED in the package (override earlier excludes)
+!agent-server/**
+!bundled-mcp/**
+!scripts/**
+!webview-ui/dist/
+
+# Misc common ignores
+.vscode/
+*.log
+.DS_Store
